@@ -1,0 +1,47 @@
+{
+  "name": "pi-auto-suggest",
+  "version": "0.1.0",
+  "description": "Pi extension that suggests the next prompt as muted ghost text in the editor, like Claude Code SUGGESTION MODE",
+  "type": "module",
+  "license": "MIT",
+  "author": "Integralist",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Integralist/pi-auto-suggest.git"
+  },
+  "files": [
+    "extensions/",
+    "src/",
+    "README.md"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "auto-suggest",
+    "prompt-suggestion",
+    "tui"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/auto-suggest.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.85.1 <2",
+    "@earendil-works/pi-coding-agent": ">=0.85.1 <2",
+    "@earendil-works/pi-tui": ">=0.85.1 <2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.5.0",
+    "@earendil-works/pi-coding-agent": "^1.5.0",
+    "@earendil-works/pi-tui": "^1.5.0",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
