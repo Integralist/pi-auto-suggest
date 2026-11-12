@@ -107,6 +107,7 @@ export default function autoSuggest(
 
     const suggestion = await generateSuggestion(ctx, config, {
       signal: abortController.signal,
+      onError: (message) => ctx.ui?.notify(`Auto-suggest failed: ${message}`, "warning"),
     });
 
     if (myGeneration !== generation || abortController.signal.aborted) {
@@ -263,7 +264,9 @@ export default function autoSuggest(
           } else {
             await triggerBackgroundSuggestion(ctx);
             if (!currentSuggestion) {
-              controller.setSuggestion("create plan from the specification");
+              controller.setSuggestion(
+                "Fallback (no model suggestion returned): create plan from the specification",
+              );
             }
           }
           return;

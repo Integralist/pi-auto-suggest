@@ -340,6 +340,123 @@ describe("sanitizeSuggestion & generateSuggestion", () => {
     expect(capturedPrompt).toContain("architect");
     expect(capturedPrompt).toContain("Spec review complete");
   });
+
+  function createSuggestionContext(streamSimple: (...args: any[]) => any): any {
+    const model = fakeModel({ provider: "github-copilot", id: "gpt-6-luna" });
+    return {
+      model,
+      scopedModels: [{ model }],
+      modelRegistry: {
+        find: () => model,
+        getAvailable: () => [model],
+        hasConfiguredAuth: () => true,
+        streamSimple,
+      },
+      sessionManager: {
+        getBranch: () => [
+          {
+            type: "message",
+            message: {
+              role: "user",
+              content: '<skill name="architect">Continue the workflow.</skill>',
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  it("reports when no authenticated model is available", async () => {
+    const onError = vi.fn();
+    const ctx = createSuggestionContext(() => ({
+      result: async () => ({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "unused" }],
+      }),
+    }));
+    ctx.modelRegistry.hasConfiguredAuth = () => false;
+
+    expect(await generateSuggestion(ctx, { enabled: true, model: "auto" }, { onError })).toBeUndefined();
+    expect(onError).toHaveBeenCalledWith("No authenticated model is available for auto-suggest.");
+  });
+
+  it("reports provider errors but not a valid NONE response", async () => {
+    const onError = vi.fn();
+    const ctx = createSuggestionContext(() => ({
+      result: async () => ({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "Expired AWS SSO session",
+        content: [],
+      }),
+    }));
+
+    expect(await generateSuggestion(ctx, { enabled: true, model: "auto" }, { onError })).toBeUndefined();
+    expect(onError).toHaveBeenCalledWith("Expired AWS SSO session");
+
+    ctx.modelRegistry.streamSimple = () => ({
+      result: async () => ({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "NONE" }],
+      }),
+    });
+    onError.mockClear();
+    expect(await generateSuggestion(ctx, { enabled: true, model: "auto" }, { onError })).toBeUndefined();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reports thrown request errors", async () => {
+    const onError = vi.fn();
+    const ctx = createSuggestionContext(() => ({
+      result: async () => {
+        throw new Error("AWS SSO credentials expired");
+      },
+    }));
+
+    expect(await generateSuggestion(ctx, { enabled: true, model: "auto" }, { onError })).toBeUndefined();
+    expect(onError).toHaveBeenCalledWith("AWS SSO credentials expired");
+  });
+
+  it("reports request timeouts but not user cancellation", async () => {
+    const onError = vi.fn();
+    const timeoutContext = createSuggestionContext((_model: any, _context: any, options: any) => ({
+      result: () =>
+        new Promise((resolve) => {
+          options.signal.addEventListener(
+            "abort",
+            () => resolve({ role: "assistant", stopReason: "aborted", content: [] }),
+            { once: true },
+          );
+        }),
+    }));
+
+    expect(
+      await generateSuggestion(timeoutContext, { enabled: true, model: "auto" }, { onError, timeoutMs: 5 }),
+    ).toBeUndefined();
+    expect(onError).toHaveBeenCalledWith("Auto-suggest request timed out after 5ms");
+
+    const controller = new AbortController();
+    const cancelContext = createSuggestionContext((_model: any, _context: any, options: any) => ({
+      result: () =>
+        new Promise((resolve) => {
+          options.signal.addEventListener(
+            "abort",
+            () => resolve({ role: "assistant", stopReason: "aborted", content: [] }),
+            { once: true },
+          );
+        }),
+    }));
+    const pending = generateSuggestion(
+      cancelContext,
+      { enabled: true, model: "auto" },
+      { onError, signal: controller.signal },
+    );
+    controller.abort();
+    expect(await pending).toBeUndefined();
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("AutoSuggestEditor ghost text & Tab/Right-Arrow acceptance", () => {
@@ -554,6 +671,25 @@ describe("extension lifecycle integration", () => {
       await cmd.handler("test", ctx);
       expect(stripTerminalSequences(rewrappedEditor.render(80)[1]!)).toContain(
         "suggested: create plan from the specification",
+      );
+
+      await cmd.handler("clear", ctx);
+      ctx.ui.notify.mockClear();
+      ctx.modelRegistry.streamSimple = () => ({
+        result: async () => ({
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: "Expired AWS SSO session",
+          content: [],
+        }),
+      });
+      await cmd.handler("test", ctx);
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        "Auto-suggest failed: Expired AWS SSO session",
+        "warning",
+      );
+      expect(stripTerminalSequences(rewrappedEditor.render(80)[1]!)).toContain(
+        "suggested: Fallback (no model suggestion returned):",
       );
 
       await cmd.handler("off", ctx);

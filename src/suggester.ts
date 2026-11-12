@@ -9,6 +9,7 @@ import {
 export type SuggestOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
+  onError?: (message: string) => void;
 };
 
 const SYSTEM_PROMPT = [
@@ -89,19 +90,39 @@ export async function generateSuggestion(
   if (!config.enabled) return undefined;
   if (options.signal?.aborted) return undefined;
 
+  const reportError = (message: string): void => {
+    if (options.signal?.aborted) return;
+    try {
+      options.onError?.(message);
+    } catch {
+      // Error reporting must not disrupt suggestion generation.
+    }
+  };
+
   const branch = ctx.sessionManager?.getBranch?.() ?? [];
   const extracted = extractConversationContext(branch);
   if (!extracted) return undefined;
 
   const resolved = resolveSuggestionModel(ctx, config);
-  if (!resolved) return undefined;
+  if (!resolved) {
+    reportError("No authenticated model is available for auto-suggest.");
+    return undefined;
+  }
 
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   options.signal?.addEventListener("abort", onAbort, { once: true });
 
   const timeoutMs = options.timeoutMs ?? 8000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new Error(`Auto-suggest request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
 
   try {
     const stream = ctx.modelRegistry.streamSimple(
@@ -127,20 +148,32 @@ export async function generateSuggestion(
       },
     );
 
-    const message = await stream.result();
-    if (controller.signal.aborted || options.signal?.aborted) {
+    const message = await Promise.race([stream.result(), timeout]);
+    if (options.signal?.aborted) return undefined;
+    if (timedOut) {
+      reportError(`Auto-suggest request timed out after ${timeoutMs}ms`);
       return undefined;
     }
     if (message.stopReason === "error" || message.stopReason === "aborted") {
+      reportError(message.errorMessage ?? `Model request ${message.stopReason}.`);
       return undefined;
     }
 
     const rawText = extractAssistantText(message.content);
     return sanitizeSuggestion(rawText);
-  } catch {
+  } catch (error) {
+    if (!options.signal?.aborted) {
+      reportError(
+        timedOut
+          ? `Auto-suggest request timed out after ${timeoutMs}ms`
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
+    }
     return undefined;
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
     options.signal?.removeEventListener("abort", onAbort);
   }
 }
