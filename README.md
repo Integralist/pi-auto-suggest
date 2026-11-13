@@ -21,6 +21,26 @@ bar after an assistant turn settles, inspired by Claude Code's SUGGESTION MODE.
   coexists with other editor extensions (such as `pi-skill-argument-hints` and
   `pi-prompt-history`).
 
+## Configuration
+
+The extension uses automatic model selection by default. To choose a model
+yourself, create `~/.pi/agent/auto-suggest.json` before starting Pi:
+
+```json
+{
+  "enabled": true,
+  "model": "github-copilot/gpt-6-luna"
+}
+```
+
+I pin this model because automatic selection in my setup may choose an AWS
+Bedrock model, and my Bedrock SSO session expires when I’m not using it.
+I’m usually logged into GitHub Copilot, so pinning Copilot keeps suggestions
+available without relying on an active Bedrock session.
+
+To let the extension choose a model instead, omit the file or set `"model"`
+to `"auto"`.
+
 ## Controls
 
 When the prompt bar is empty and a ghost suggestion is visible:
