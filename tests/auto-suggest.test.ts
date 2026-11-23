@@ -457,6 +457,63 @@ describe("sanitizeSuggestion & generateSuggestion", () => {
     expect(await pending).toBeUndefined();
     expect(onError).toHaveBeenCalledTimes(1);
   });
+
+  it("allocates sufficient maxTokens headroom for reasoning and non-reasoning models", async () => {
+    const capturedMaxTokens: number[] = [];
+
+    const reasoningCtx = createSuggestionContext((_model: any, _context: any, options: any) => {
+      capturedMaxTokens.push(options.maxTokens);
+      return {
+        result: async () => ({
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: "run tests" }],
+        }),
+      };
+    });
+    expect(await generateSuggestion(reasoningCtx, { enabled: true, model: "auto" })).toBe("run tests");
+
+    const nonReasoningModel = fakeModel({
+      provider: "github-copilot",
+      id: "gpt-4o-mini",
+      reasoning: false,
+    });
+    const nonReasoningCtx = createSuggestionContext((_model: any, _context: any, options: any) => {
+      capturedMaxTokens.push(options.maxTokens);
+      return {
+        result: async () => ({
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: "run tests" }],
+        }),
+      };
+    });
+    nonReasoningCtx.model = nonReasoningModel;
+    nonReasoningCtx.scopedModels = [{ model: nonReasoningModel }];
+    nonReasoningCtx.modelRegistry.find = () => nonReasoningModel;
+    nonReasoningCtx.modelRegistry.getAvailable = () => [nonReasoningModel];
+
+    expect(await generateSuggestion(nonReasoningCtx, { enabled: true, model: "auto" })).toBe(
+      "run tests",
+    );
+    expect(capturedMaxTokens).toEqual([1024, 128]);
+  });
+
+  it("drops truncated suggestions when stopReason is length without reporting an error", async () => {
+    const onError = vi.fn();
+    const ctx = createSuggestionContext(() => ({
+      result: async () => ({
+        role: "assistant",
+        stopReason: "length",
+        content: [{ type: "text", text: "tackle both pi-clean" }],
+      }),
+    }));
+
+    expect(
+      await generateSuggestion(ctx, { enabled: true, model: "auto" }, { onError }),
+    ).toBeUndefined();
+    expect(onError).not.toHaveBeenCalled();
+  });
 });
 
 describe("AutoSuggestEditor ghost text & Tab/Right-Arrow acceptance", () => {

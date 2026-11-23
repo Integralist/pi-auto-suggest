@@ -140,7 +140,7 @@ export async function generateSuggestion(
       },
       {
         reasoning: resolved.effort === "off" ? undefined : resolved.effort,
-        maxTokens: 64,
+        maxTokens: resolved.model.reasoning ? 1024 : 128,
         maxRetries: 0,
         toolChoice: "none",
         cacheRetention: "none",
@@ -156,6 +156,9 @@ export async function generateSuggestion(
     }
     if (message.stopReason === "error" || message.stopReason === "aborted") {
       reportError(message.errorMessage ?? `Model request ${message.stopReason}.`);
+      return undefined;
+    }
+    if (message.stopReason === "length") {
       return undefined;
     }
 
